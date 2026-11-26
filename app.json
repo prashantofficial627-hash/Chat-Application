@@ -10,12 +10,22 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSCameraUsageDescription": "Allow Chat Application to access your camera to take and send photos to your friends.",
+        "NSPhotoLibraryUsageDescription": "Allow Chat Application to access your photos to share them with your friends."
+      }
     },
     "android": {
       "adaptiveIcon": {
         "backgroundColor": "#ffffff"
-      }
+      },
+      "permissions": [
+        "android.permission.CAMERA",
+        "android.permission.RECORD_AUDIO"
+      ],
+      "package": "com.prashant27.chatapplication",
+      "usesCleartextTraffic": true
     },
     "web": {
       "bundler": "metro"
@@ -24,7 +34,8 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Allow Chat Application to access your camera"
+          "cameraPermission": "Allow Chat Application to access your camera",
+          "microphonePermission": false
         }
       ],
       [
@@ -34,6 +45,11 @@
         }
       ],
       "expo-asset"
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "80474927-efd3-4ffb-962d-2a7c34c47b3d"
+      }
+    }
   }
 }

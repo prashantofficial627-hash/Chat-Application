@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View,
   Text,
@@ -9,64 +9,149 @@ import {
   StyleSheet,
   KeyboardAvoidingView,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
-import { getMessages, addMessage } from '../data';
+import { getSocket, getCurrentUser } from '../socket';
 import { pickImage } from './ImagePicker';
 
 export default function ChatScreen({ route, navigation }) {
-  // the user we are chatting with (sent from the previous screen)
-  const { user } = route.params;
+  const { user: friend } = route.params;
+  const currentUser = getCurrentUser();
 
-  const [messages, setMessages] = useState(getMessages(user.id));
+  const [messages, setMessages] = useState([]);
   const [text, setText] = useState('');
+  const [loading, setLoading] = useState(true);
+  const flatListRef = useRef(null);
 
-  // reload messages when we come back from the camera screen
+  // load chat history and listen for new messages
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => {
-      setMessages([...getMessages(user.id)]);
-    });
-    return unsubscribe;
-  }, [navigation]);
+    if (!currentUser || !friend) return;
+
+    const socket = getSocket();
+
+    // fetch past messages
+    socket.emit(
+      'get_messages',
+      { userId: currentUser.id, friendId: friend.id },
+      (history) => {
+        setMessages(history || []);
+        setLoading(false);
+      }
+    );
+
+    // real-time listener for incoming messages
+    const onNewMessage = (msg) => {
+      const isThisConversation =
+        (msg.senderId === currentUser.id && msg.receiverId === friend.id) ||
+        (msg.senderId === friend.id && msg.receiverId === currentUser.id);
+
+      if (isThisConversation) {
+        setMessages((prev) => {
+          if (prev.some((m) => m.id === msg.id)) return prev;
+          return [...prev, msg];
+        });
+      }
+    };
+
+    socket.on('new_message', onNewMessage);
+
+    return () => {
+      socket.off('new_message', onNewMessage);
+    };
+  }, [currentUser, friend]);
+
+  // show message in UI immediately
+  const appendLocalMessage = (msg) => {
+    setMessages((prev) => [...prev, msg]);
+    setTimeout(() => {
+      flatListRef.current?.scrollToEnd({ animated: true });
+    }, 100);
+  };
 
   // send a text message
   const sendMessage = () => {
-    if (text.trim() === '') {
-      return;
-    }
+    if (!text.trim()) return;
 
-    addMessage(user.id, { id: Date.now().toString(), text: text, sender: 'me' });
-    setMessages([...getMessages(user.id)]);
+    const messageText = text.trim();
     setText('');
 
-    // fake reply after 1 second (no server)
-    setTimeout(() => {
-      addMessage(user.id, {
-        id: (Date.now() + 1).toString(),
-        text: 'You said: ' + text,
-        sender: 'friend',
-      });
-      setMessages([...getMessages(user.id)]);
-    }, 1000);
-  };
+    const newMsg = {
+      id: Date.now().toString(),
+      senderId: currentUser?.id || 'me',
+      receiverId: friend.id,
+      text: messageText,
+      image: null,
+      createdAt: new Date().toISOString(),
+    };
 
-  // send a photo from the gallery
-  const sendGalleryPhoto = async () => {
-    const uri = await pickImage();
-    if (uri) {
-      addMessage(user.id, { id: Date.now().toString(), image: uri, sender: 'me' });
-      setMessages([...getMessages(user.id)]);
+    appendLocalMessage(newMsg);
+
+    // emit to server
+    const socket = getSocket();
+    if (socket && socket.connected) {
+      socket.emit('send_message', {
+        senderId: currentUser?.id || 'me',
+        receiverId: friend.id,
+        text: messageText,
+      });
     }
   };
 
+  // send photo from camera or gallery
+  const sendPhoto = (photoData) => {
+    if (!photoData) return;
+
+    const newMsg = {
+      id: Date.now().toString(),
+      senderId: currentUser?.id || 'me',
+      receiverId: friend.id,
+      text: '',
+      image: photoData,
+      createdAt: new Date().toISOString(),
+    };
+
+    appendLocalMessage(newMsg);
+
+    const socket = getSocket();
+    if (socket && socket.connected) {
+      socket.emit('send_message', {
+        senderId: currentUser?.id || 'me',
+        receiverId: friend.id,
+        image: photoData,
+      });
+    }
+  };
+
+  // pick photo from gallery
+  const handlePickGallery = async () => {
+    const photo = await pickImage();
+    if (photo) {
+      sendPhoto(photo);
+    }
+  };
+
+  // navigate to camera screen
+  const handleOpenCamera = () => {
+    navigation.navigate('CameraScreen', {
+      user: friend,
+      onPhotoCaptured: (photo) => sendPhoto(photo),
+    });
+  };
+
+  // render individual message bubble
   const renderMessage = ({ item }) => {
-    const isMe = item.sender === 'me';
+    const isMe = item.senderId === currentUser?.id;
+    const time = item.createdAt
+      ? new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+      : '';
+
     return (
       <View style={[styles.bubble, isMe ? styles.myBubble : styles.friendBubble]}>
         {item.image ? (
-          <Image source={{ uri: item.image }} style={styles.photo} />
-        ) : (
-          <Text style={styles.messageText}>{item.text}</Text>
-        )}
+          <Image source={{ uri: item.image }} style={styles.photo} resizeMode="cover" />
+        ) : null}
+        {item.text ? <Text style={styles.messageText}>{item.text}</Text> : null}
+        {time ? <Text style={styles.timeText}>{time}</Text> : null}
       </View>
     );
   };
@@ -75,31 +160,49 @@ export default function ChatScreen({ route, navigation }) {
     <KeyboardAvoidingView
       style={styles.container}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={90}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <FlatList
-        data={messages}
-        renderItem={renderMessage}
-        keyExtractor={(item) => item.id}
-        contentContainerStyle={styles.list}
-      />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="small" color="#2196f3" />
+        </View>
+      ) : messages.length === 0 ? (
+        <View style={styles.center}>
+          <Text style={styles.emptyText}>Say hello to {friend.name}!</Text>
+        </View>
+      ) : (
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          renderItem={renderMessage}
+          keyExtractor={(item) => item.id}
+          contentContainerStyle={styles.messageList}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+        />
+      )}
 
-      <View style={styles.inputRow}>
-        <TouchableOpacity onPress={() => navigation.navigate('CameraScreen', { user: user })}>
+      {/* Input bar */}
+      <View style={styles.inputBar}>
+        <TouchableOpacity style={styles.iconBtn} onPress={handleOpenCamera}>
           <Text style={styles.icon}>📷</Text>
         </TouchableOpacity>
-        <TouchableOpacity onPress={sendGalleryPhoto}>
+        <TouchableOpacity style={styles.iconBtn} onPress={handlePickGallery}>
           <Text style={styles.icon}>🖼️</Text>
         </TouchableOpacity>
 
         <TextInput
           style={styles.input}
-          placeholder="Type a message"
+          placeholder="Type a message..."
           value={text}
           onChangeText={setText}
         />
-        <TouchableOpacity style={styles.button} onPress={sendMessage}>
-          <Text style={styles.buttonText}>Send</Text>
+
+        <TouchableOpacity
+          style={[styles.sendBtn, !text.trim() && styles.sendBtnDisabled]}
+          onPress={sendMessage}
+          disabled={!text.trim()}
+        >
+          <Text style={styles.sendBtnText}>Send</Text>
         </TouchableOpacity>
       </View>
     </KeyboardAvoidingView>
@@ -107,34 +210,58 @@ export default function ChatScreen({ route, navigation }) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f2f2f2' },
-  list: { padding: 10 },
-  bubble: { maxWidth: '75%', padding: 10, borderRadius: 10, marginVertical: 4 },
-  myBubble: { backgroundColor: '#c8e6c9', alignSelf: 'flex-end' },
-  friendBubble: { backgroundColor: 'white', alignSelf: 'flex-start' },
-  messageText: { fontSize: 16 },
-  photo: { width: 180, height: 180, borderRadius: 8 },
-  inputRow: {
+  container: { flex: 1, backgroundColor: '#efeae2' },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
+  emptyText: { color: '#888', fontSize: 16 },
+  messageList: { padding: 12 },
+  bubble: {
+    maxWidth: '80%',
+    padding: 8,
+    borderRadius: 12,
+    marginVertical: 4,
+  },
+  myBubble: {
+    backgroundColor: '#dcf8c6',
+    alignSelf: 'flex-end',
+  },
+  friendBubble: {
+    backgroundColor: '#ffffff',
+    alignSelf: 'flex-start',
+  },
+  messageText: { fontSize: 15, paddingHorizontal: 4 },
+  timeText: { fontSize: 10, color: '#777', alignSelf: 'flex-end', marginTop: 3 },
+  photo: {
+    width: 220,
+    height: 180,
+    borderRadius: 8,
+    marginBottom: 4,
+  },
+  inputBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 10,
-    backgroundColor: 'white',
+    padding: 8,
+    backgroundColor: '#f6f6f6',
+    borderTopWidth: 1,
+    borderTopColor: '#e0e0e0',
   },
-  icon: { fontSize: 24, marginRight: 8 },
+  iconBtn: { padding: 6 },
+  icon: { fontSize: 22 },
   input: {
     flex: 1,
-    borderWidth: 1,
-    borderColor: '#ccc',
+    backgroundColor: '#fff',
     borderRadius: 20,
-    paddingHorizontal: 15,
+    paddingHorizontal: 14,
     paddingVertical: 8,
-    marginRight: 8,
+    marginHorizontal: 6,
+    borderWidth: 1,
+    borderColor: '#ddd',
   },
-  button: {
-    backgroundColor: '#2196f3',
+  sendBtn: {
+    backgroundColor: '#00a884',
     paddingHorizontal: 16,
-    paddingVertical: 10,
+    paddingVertical: 9,
     borderRadius: 20,
   },
-  buttonText: { color: 'white', fontWeight: 'bold' },
+  sendBtnDisabled: { backgroundColor: '#b0bec5' },
+  sendBtnText: { color: '#fff', fontWeight: 'bold' },
 });
