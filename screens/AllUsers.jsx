@@ -42,7 +42,7 @@ export default function AllUsers({ navigation }) {
   const renderItem = ({ item }) => (
     <TouchableOpacity style={styles.row} onPress={() => openChat(item)}>
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{item.name[0].toUpperCase()}</Text>
+        <Text style={styles.avatarText}>{(item.name?.[0] || '?').toUpperCase()}</Text>
         {item.isOnline && <View style={styles.onlineBadge} />}
       </View>
       <View style={styles.info}>

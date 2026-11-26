@@ -1,7 +1,11 @@
 import React from 'react';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Stack from './screens/Stack';
 
-// App.js only shows the navigation stack, all screens are inside it
 export default function App() {
-  return <Stack />;
+  return (
+    <SafeAreaProvider>
+      <Stack />
+    </SafeAreaProvider>
+  );
 }

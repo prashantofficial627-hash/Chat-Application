@@ -60,7 +60,7 @@ export default function Conversations({ navigation }) {
       onPress={() => navigation.navigate('ChatScreen', { user: item })}
     >
       <View style={styles.avatar}>
-        <Text style={styles.avatarText}>{item.name[0].toUpperCase()}</Text>
+        <Text style={styles.avatarText}>{(item.name?.[0] || '?').toUpperCase()}</Text>
         {item.isOnline && <View style={styles.onlineBadge} />}
       </View>
       <View style={styles.chatInfo}>
