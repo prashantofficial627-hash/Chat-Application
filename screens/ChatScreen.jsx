@@ -90,9 +90,11 @@ export default function ChatScreen({ route, navigation }) {
     const socket = getSocket();
     if (socket && socket.connected) {
       socket.emit('send_message', {
+        id: newMsg.id,
         senderId: currentUser?.id || 'me',
         receiverId: friend.id,
         text: messageText,
+        createdAt: newMsg.createdAt,
       });
     }
   };
@@ -115,9 +117,11 @@ export default function ChatScreen({ route, navigation }) {
     const socket = getSocket();
     if (socket && socket.connected) {
       socket.emit('send_message', {
+        id: newMsg.id,
         senderId: currentUser?.id || 'me',
         receiverId: friend.id,
         image: photoData,
+        createdAt: newMsg.createdAt,
       });
     }
   };

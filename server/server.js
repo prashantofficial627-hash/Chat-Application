@@ -109,31 +109,28 @@ io.on('connection', (socket) => {
 
   // handle new text or photo message
   socket.on('send_message', (data, callback) => {
-    const { senderId, receiverId, text, image } = data;
+    const { senderId, receiverId, text, image, id, createdAt } = data;
     if (!senderId || !receiverId || (!text && !image)) return;
 
     const sender = users.get(senderId);
     const receiver = users.get(receiverId);
 
     const newMsg = {
-      id: Date.now().toString(),
+      id: id || Date.now().toString(),
       senderId,
       senderName: sender ? sender.name : 'Unknown',
       receiverId,
       text: text || '',
       image: image || null,
-      createdAt: new Date().toISOString(),
+      createdAt: createdAt || new Date().toISOString(),
     };
 
     messages.push(newMsg);
 
     // push message to receiver if they are currently online
-    if (receiver && receiver.socketId) {
+    if (receiver && receiver.socketId && receiver.socketId !== socket.id) {
       io.to(receiver.socketId).emit('new_message', newMsg);
     }
-
-    // send back to sender for confirmation
-    socket.emit('new_message', newMsg);
 
     if (callback) callback({ success: true, message: newMsg });
 
